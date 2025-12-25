@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Obsidian Chess Studio Pro</title>
+    <!-- Dependencies -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.13.4/chess.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        body { background-color: #161512; color: #bababa; font-family: sans-serif; overflow: hidden; }
+        .chess-board { display: grid; grid-template-columns: repeat(8, 1fr); border: 8px solid #262421; }
+        .square-dark { background-color: #769656; }
+        .square-light { background-color: #eeeed2; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #312e2b; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        const ObsidianChessApp = () => {
+            const [game, setGame] = useState(new Chess());
+            const [selectedSquare, setSelectedSquare] = useState(null);
+            const [markup, setMarkup] = useState({ arrows: [], circles: [] });
+            const [activeTab, setActiveTab] = useState('notation');
+            const [courses, setCourses] = useState(() => {
+                const saved = localStorage.getItem('obsidian_courses');
+                return saved ? JSON.parse(saved) : [];
+            });
+
+            // Right-click arrow state
+            const [dragStart, setDragStart] = useState(null);
+
+            // Save courses to local storage
+            useEffect(() => {
+                localStorage.setItem('obsidian_courses', JSON.stringify(courses));
+            }, [courses]);
+
+            const makeMove = (move) => {
+                const gameCopy = new Chess(game.fen());
+                const result = gameCopy.move(move);
+                if (result) {
+                    setGame(gameCopy);
+                    setMarkup({ arrows: [], circles: [] }); // Clear drawings on move
+                    return true;
+                }
+                return false;
+            };
+
+            const handleSquareClick = (square) => {
+                if (selectedSquare === square) {
+                    setSelectedSquare(null);
+                } else if (selectedSquare) {
+                    const moveResult = makeMove({ from: selectedSquare, to: square, promotion: 'q' });
+                    setSelectedSquare(null);
+                } else {
+                    const piece = game.get(square);
+                    if (piece && piece.color === game.turn()) setSelectedSquare(square);
+                }
+            };
+
+            // Drawing Arrows Logic
+            const onRightMouseDown = (square) => { setDragStart(square); };
+            const onRightMouseUp = (endSquare) => {
+                if (dragStart === endSquare) {
+                    setMarkup(prev => ({...prev, circles: prev.circles.includes(endSquare) ? prev.circles.filter(s => s !== endSquare) : [...prev.circles, endSquare]}));
+                } else if (dragStart) {
+                    setMarkup(prev => ({...prev, arrows: [...prev.arrows, { from: dragStart, to: endSquare }]}));
+                }
+                setDragStart(null);
+            };
+
+            const addPositionToCourse = () => {
+                const courseName = prompt("Course Name?");
+                if (!courseName) return;
+                const posName = prompt("Position Name?");
+                
+                setCourses(prev => {
+                    const existing = prev.find(c => c.name === courseName);
+                    if (existing) {
+                        existing.positions.push({ name: posName, fen: game.fen() });
+                        return [...prev];
+                    }
+                    return [...prev, { name: courseName, positions: [{ name: posName, fen: game.fen() }] }];
+                });
+            };
+
+            return (
+                <div className="h-screen w-full flex p-6 gap-6">
+                    {/* LEFT: Notation & Advantage */}
+                    <div className="w-80 bg-[#262421] rounded-xl border border-[#312e2b] flex flex-col shadow-2xl">
+                        <div className="p-4 border-b border-[#312e2b] font-bold text-white text-xs uppercase tracking-widest">Notation</div>
+                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-1">
+                            {game.history().map((m, i) => (
+                                <div key={i} className="text-sm p-2 bg-[#1c1a17] rounded flex justify-between">
+                                    <span className="text-gray-500">{i + 1}.</span>
+                                    <span className="text-white font-mono">{m}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* CENTER: The Board */}
+                    <div className="flex-1 flex flex-col items-center justify-center">
+                        <div 
+                            className="chess-board relative w-[600px] h-[600px] shadow-2xl"
+                            onContextMenu={(e) => e.preventDefault()}
+                        >
+                            {game.board().map((row, r) => row.map((col, c) => {
+                                const squareName = String.fromCharCode(97 + c) + (8 - r);
+                                const isDark = (r + c) % 2 === 1;
+                                const isCircle = markup.circles.includes(squareName);
+
+                                return (
+                                    <div 
+                                        key={squareName}
+                                        onClick={() => handleSquareClick(squareName)}
+                                        onMouseDown={(e) => e.button === 2 && onRightMouseDown(squareName)}
+                                        onMouseUp={(e) => e.button === 2 && onRightMouseUp(squareName)}
+                                        className={`relative flex items-center justify-center cursor-pointer ${isDark ? 'square-dark' : 'square-light'}`}
+                                    >
+                                        {selectedSquare === squareName && <div className="absolute inset-0 bg-yellow-400/40" />}
+                                        {isCircle && <div className="absolute w-4/5 h-4/5 border-4 border-red-500/60 rounded-full" />}
+                                        
+                                        {col && (
+                                            <img 
+                                                src={`https://lichess1.org/assets/piece/cburnett/${col.color}${col.type.toUpperCase()}.svg`} 
+                                                className="w-full h-full z-10"
+                                            />
+                                        )}
+                                        {c === 0 && <span className="absolute top-0.5 left-0.5 text-[10px] font-bold opacity-50">{8-r}</span>}
+                                        {r === 7 && <span className="absolute bottom-0.5 right-0.5 text-[10px] font-bold opacity-50">{String.fromCharCode(97+c)}</span>}
+                                    </div>
+                                );
+                            }))}
+
+                            {/* Arrows Overlay */}
+                            <svg className="absolute inset-0 pointer-events-none z-20 w-full h-full">
+                                <defs>
+                                    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                                        <polygon points="0 0, 10 3.5, 0 7" fill="rgba(255, 170, 0, 0.8)" />
+                                    </marker>
+                                </defs>
+                                {markup.arrows.map((arrow, i) => {
+                                    const fx = (arrow.from.charCodeAt(0) - 97) * 12.5 + 6.25;
+                                    const fy = (8 - parseInt(arrow.from[1])) * 12.5 + 6.25;
+                                    const tx = (arrow.to.charCodeAt(0) - 97) * 12.5 + 6.25;
+                                    const ty = (8 - parseInt(arrow.to[1])) * 12.5 + 6.25;
+                                    return <line key={i} x1={fx+'%'} y1={fy+'%'} x2={tx+'%'} y2={ty+'%'} stroke="rgba(255,170,0,0.8)" strokeWidth="8" markerEnd="url(#arrowhead)" />;
+                                })}
+                            </svg>
+                        </div>
+                    </div>
+
+                    {/* RIGHT: Course Studio */}
+                    <div className="w-96 bg-[#262421] rounded-xl border border-[#312e2b] flex flex-col shadow-2xl">
+                        <div className="p-4 border-b border-[#312e2b] flex justify-between items-center bg-[#1c1a17]">
+                            <span className="font-bold text-white text-xs uppercase tracking-widest">Course Studio</span>
+                            <button onClick={addPositionToCourse} className="p-2 bg-green-600 rounded text-white hover:bg-green-500 transition-all">
+                                <i data-lucide="plus-circle"></i>
+                            </button>
+                        </div>
+                        
+                        <div className="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-4">
+                            {courses.length === 0 && <div className="text-center text-gray-600 mt-10 text-sm italic">No courses created yet.</div>}
+                            {courses.map((course, idx) => (
+                                <div key={idx} className="bg-[#1c1a17] border border-[#312e2b] rounded-lg p-3">
+                                    <div className="text-white font-bold text-sm mb-2">{course.name}</div>
+                                    <div className="space-y-1">
+                                        {course.positions.map((pos, pIdx) => (
+                                            <div 
+                                                key={pIdx} 
+                                                onClick={() => setGame(new Chess(pos.fen))}
+                                                className="text-xs p-2 bg-[#262421] hover:bg-[#312e2b] cursor-pointer rounded text-gray-400"
+                                            >
+                                                {pos.name}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="p-4 border-t border-[#312e2b] text-[10px] text-gray-500 text-center uppercase tracking-widest">
+                            Right-click to draw arrows • Click to move
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<ObsidianChessApp />);
+        
+        // Initialize Lucide Icons
+        setTimeout(() => lucide.createIcons(), 500);
+    </script>
+</body>
+</html>
